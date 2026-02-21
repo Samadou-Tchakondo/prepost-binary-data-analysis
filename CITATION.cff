@@ -1,0 +1,11 @@
+cff-version: 1.2.0
+title: "Transforming Pre-Post Binary Data into Analytical Evidence"
+message: "If you use this project, please cite it as below."
+type: software
+authors:
+  - given-names: Samadou
+    family-names: Tchakondo
+    orcid: https://orcid.org/0009-0006-6747-3170
+affiliation: SRM Institute of Science and Technology
+date-released: 2026
+repository-code: https://github.com/Samadou-Tchakondo/prepost-binary-data-analysis
