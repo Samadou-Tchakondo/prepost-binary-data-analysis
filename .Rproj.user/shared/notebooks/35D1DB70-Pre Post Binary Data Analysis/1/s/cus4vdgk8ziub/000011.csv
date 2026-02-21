@@ -1,0 +1,5 @@
+"0","# Import CSV file "
+"0","dataset = read.csv(""data/practicedata.csv"") "
+"0",""
+"0","# Preview the first rows of the dataset"
+"0","head(dataset)"

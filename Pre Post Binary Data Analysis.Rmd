@@ -1,0 +1,402 @@
+---
+title: "Transforming Pre-Post Binary Data into Analytical Evidence"
+author: "Samadou Tchakondo"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: false
+    toc_depth: 3
+    toc_float: true
+    number_sections: true
+    theme: cosmo
+    highlight: tango
+  word_document: default
+  pdf_document:
+    latex_engine: xelatex
+---
+
+# **Introduction**
+
+This project demonstrates how binary pre-post assessment data can be transformed into statistically valid and interpretable evidence using R. The objective is to illustrate appropriate score construction, reliability assessment, assumption checking, and non-parametric evaluation of within-subject change.
+
+
+# **Dataset Description**
+
+The analysis uses the **Public Health Training Knowledge & Skills (PHTKS-10)** dataset, which represents a pre-post evaluation conducted among **60 participants** attending a public health training program.
+
+The assessment instrument consists of **10 binary items** (0 = incorrect, 1 = correct), designed to measure participant competencies across three domains:
+
+**- Health Knowledge (HK)** - foundational understanding of core public health concepts (3 items)
+
+**- Statistical Reasoning (SR)** - comprehension of statistical methods, assumptions, and interpretation (4 items)
+
+**- Reporting & Publishing (RP)** - knowledge of scientific writing and reporting standards (3 items)
+
+Each participant completed the questionnaire before (pre-test) and after (post-test) the training, enabling within-subject evaluation of learning-related change.
+
+
+# **Data Import and Initial Inspection**
+```{r}
+# Import CSV file 
+dataset = read.csv("data/practicedata.csv") 
+
+# Preview the first rows of the dataset
+head(dataset)
+
+# Check structure (variable types) 
+str(dataset) 
+
+# Check total missing values
+sum(is.na(dataset))
+```
+
+
+# **Scores  Derivation**
+
+Total and domain-specific scores were calculated by summing binary item responses for each participant at the pre-test and post-test time points.
+
+
+## **Pre-Test Scores**
+```{r}
+# Pre-Test Scores
+
+# Total score (all 10 items)
+dataset$pre_total <- rowSums(dataset[, 2:11])
+
+# Domain scores
+dataset$pre_HK <- rowSums(dataset[, 2:4])   # Health Knowledge (3 items)
+
+dataset$pre_SR <- rowSums(dataset[, 5:8])   # Statistical Reasoning (4 items)
+
+dataset$pre_RP <- rowSums(dataset[, 9:11])  # Reporting & Publishing (3 items)
+```
+
+## **Post-Test Scores**
+```{r}
+# Post-Test Scores
+
+# Total score (all 10 items)
+dataset$post_total <- rowSums(dataset[, 12:21])
+
+# Domain scores
+dataset$post_HK <- rowSums(dataset[, 12:14])  # Health Knowledge (3 items)
+
+dataset$post_SR <- rowSums(dataset[, 15:18])  # Statistical Reasoning (4 items)
+
+dataset$post_RP <- rowSums(dataset[, 19:21])  # Reporting & Publishing (3 items)
+
+```
+
+## **Verify Newly Created Variables**
+```{r}
+# Inspect the new variables
+head(dataset[, c("pre_total","post_total",
+                 "pre_HK","post_HK",
+                 "pre_SR","post_SR",
+                 "pre_RP","post_RP")])
+```
+
+# **Reliability Assessment using Cronbach’s Alpha test**
+
+Internal consistency of the PHTKS-10 instrument was evaluated using Cronbach’s alpha to assess whether the items measured a coherent underlying construct at both pre- and post-training time points.
+
+
+## **Load Required Package**
+
+The psych package provides functions for computing reliability statistics.
+```{r warning=FALSE}
+# Install package (run only if not already installed)
+
+#install.packages("psych")
+
+# Load the package
+library(psych)
+```
+
+
+## **Extract Item-Level Data**
+
+This step isolates the raw binary responses for each participant at both time points, ensuring that reliability is assessed on the measurement tool itself rather than on computed summaries.
+```{r}
+# Extract item-level responses
+pre_data  <- dataset[, 2:11]   # Pre-test items (10)
+post_data <- dataset[, 12:21]  # Post-test items (10)
+```
+
+
+## **Compute Cronbach’s Alpha for  Pre-Test and post-test**
+```{r warning=FALSE}
+# Cronbach's alpha for pre-test
+alpha_pre <- alpha(pre_data)
+
+# Cronbach's alpha
+alpha_pre  <- alpha(pre_data)$total$std.alpha # for pre-test
+alpha_post <- alpha(post_data)$total$std.alpha # for post-test
+
+alpha_pre
+alpha_post
+```
+
+Cronbach’s alpha indicated acceptable internal consistency at both time points **(pre-test α = 0.68; post-test α = 0.69)**. The similarity of these values suggests that the instrument functioned consistently before and after the training, supporting the reliability of the observed changes in participant scores.
+
+
+
+# **Distribution Assessment**
+
+The distribution of total scores was examined visually to evaluate their shape and to inform the choice of appropriate statistical methods, given that summed binary items often produce bounded and non-normal distributions.
+
+
+## **Histograms of Pre- and Post-Test Scores**
+
+Histograms provide an overview of how scores are distributed across participants.
+```{r}
+# Histogram 
+
+# Pre-test total score distribution
+hist(dataset$pre_total,
+     breaks = 10,
+     main = "Distribution of Pre-Test Total Scores",
+     xlab = "Pre-Test Total Score",
+     ylab = "Frequency")
+
+# Post-test total score distribution
+hist(dataset$post_total,
+     breaks = 10,
+     main = "Distribution of Post-Test Total Scores",
+     xlab = "Post-Test Total Score",
+     ylab = "Frequency")
+```
+
+Visual inspection of the histograms indicates that the pre-test total scores are moderately dispersed, with a concentration of participants in the lower-to-middle score range. The distribution is slightly skewed and bounded by the minimum and maximum possible scores, reflecting the summed binary nature of the items.
+
+In contrast, the post-test total scores show a noticeable shift toward higher values, suggesting an overall improvement following the training. The distribution appears compressed near the upper score range, indicating a possible ceiling tendency, where several participants achieved high scores after the intervention.
+
+
+
+## **Boxplot Comparison of Pre- and Post-Test Scores**
+
+Boxplots allow comparison of central tendency, variability, and potential ceiling effects between the two time points.
+```{r}
+# Boxplot comparison
+
+boxplot(dataset$pre_total, dataset$post_total,
+        names = c("Pre-Test", "Post-Test"),
+        main = "Pre–Post Comparison of Total Scores",
+        ylab = "Total Score")
+```
+
+The boxplot confirms an upward shift in central tendency from pre-test to post-test, with higher median scores and a concentration of values near the upper range after training, indicating consistent gains across participants.
+
+
+
+
+# **Normality Testing Using the Shapiro-Wilk Test**
+
+To determine whether parametric assumptions are met, we formally test the normality of the pre- and post-test total scores using the Shapiro-Wilk test. This test evaluates whether the observed data significantly deviate from a normal distribution.
+
+```{r}
+# Shapiro-Wilk normality
+
+# Test for pre-test total scores
+shapiro.test(dataset$pre_total)
+
+# Test for post-test total scores
+shapiro.test(dataset$post_total)
+```
+
+For the pre-test total score, the test showed **W = 0.943, p = 0.0076**, indicating a statistically significant deviation from normality.
+
+For the post-test total score, the test showed **W = 0.959, p = 0.0415**, also indicating a statistically significant deviation from normality.
+
+Since both p-values are less than **0.05 (p < 0.05)**, the assumption of normality is violated for both time points,  supporting the use of non-parametric testing.
+
+
+
+
+# **Primary Analysis: Pre-Post Change in Total Scores**
+
+The Wilcoxon signed-rank test is used to assess whether there is a statistically significant change in total scores following the training. This non-parametric test evaluates within-subject differences without assuming normal distribution.
+
+```{r}
+# Wilcoxon Signed-Rank Test (Total Scores)
+
+result <- wilcox.test(dataset$post_total,
+                      dataset$pre_total,
+                      paired = TRUE,
+                      conf.int = TRUE,
+                      conf.level = 0.95,
+                      exact = FALSE)
+
+result
+```
+
+The Wilcoxon signed-rank test revealed a statistically significant difference between pre- and post-training total scores **(V = 1602, p < 0.001)**, indicating higher scores following the training compared with baseline.
+
+The Hodges–Lehmann estimate of the median difference was 2.50, suggesting that participants improved by approximately 2.5 points on average.
+
+The 95% confidence interval **(2.00 to 3.00)** did not include zero, confirming that the observed improvement was statistically significant.
+
+Overall, these findings provide strong evidence that the training was associated with a meaningful increase in participant knowledge and skills as measured by the PHTKS-10 total score.
+
+
+
+# **Effect Size Estimation**
+
+To complement the hypothesis test, an effect size was calculated to quantify the magnitude of the observed change. For the Wilcoxon signed-rank test, the effect size (r) is defined as:
+
+                                                        r = |z| / √N
+
+where z is the standard normal deviate associated with the test statistic and N is the number of paired observations. This measure provides a scale-independent estimate of the strength of the intervention effect.
+
+```{r}
+# Convert Wilcoxon p-value to z-score
+z <- qnorm(result$p.value / 2)
+
+# Number of paired observations
+N <- length(dataset$pre_total)
+
+# Compute effect size (r)
+r <- abs(z) / sqrt(N)
+
+r
+```
+
+The estimated effect size was r ≈ 0.80, indicating a large magnitude of change according to common interpretation thresholds (≈ 0.10 small, ≈ 0.30 medium, ≥0.50 large). This suggests that the improvement observed after training was not only statistically significant but also practically substantial.
+
+
+
+
+# **Domain-Level Analysis Using the Wilcoxon Signed-Rank Test**
+
+To examine where improvements were concentrated, paired comparisons were conducted separately for each domain (Health Knowledge, Statistical Reasoning, and Reporting & Publishing) using the Wilcoxon signed-rank test.
+
+
+## **Health Knowledge Domain**
+```{r}
+# Health Knowledge Domain
+
+result_HK <- wilcox.test(dataset$post_HK,
+                         dataset$pre_HK,
+                         paired = TRUE,
+                         conf.int = TRUE,
+                         conf.level = 0.95,
+                         exact = FALSE)
+
+result_HK
+```
+
+The Wilcoxon signed-rank test showed a statistically significant improvement in the Health Knowledge domain **(V = 749, p < 0.001)**.
+The median gain was approximately 1.00 point, with a 95% confidence interval ranging from 0.50 to 1.50.
+
+Since the confidence interval does not include zero, this indicates a meaningful increase in participants’ foundational public health knowledge following the training.
+
+
+## **Statistical Reasoning Domain**
+```{r}
+# Statistical Reasoning Domain
+
+result_SR <- wilcox.test(dataset$post_SR,
+                         dataset$pre_SR,
+                         paired = TRUE,
+                         conf.int = TRUE,
+                         conf.level = 0.95,
+                         exact = FALSE)
+
+result_SR
+```
+
+A highly significant improvement was observed in the Statistical Reasoning domain (V = 1176, p < 0.001).
+
+The estimated median gain was approximately 1.50 points, with a 95% confidence interval of 1.00 to 1.50.
+
+This represents the largest improvement among the three domains, suggesting that the training was particularly effective in strengthening participants’ understanding of statistical concepts and analytical reasoning.
+
+
+## **Reporting & Publishing Domain**
+```{r}
+# Reporting & Publishing Domain
+
+result_RP <- wilcox.test(dataset$post_RP,
+                         dataset$pre_RP,
+                         paired = TRUE,
+                         conf.int = TRUE,
+                         conf.level = 0.95,
+                         exact = FALSE)
+
+result_RP
+```
+
+The Reporting & Publishing domain also demonstrated a statistically significant increase (V = 728, p < 0.001).
+
+The median gain was approximately 1.50 points, with a 95% confidence interval between 1.00 and 1.50.
+
+This finding indicates substantial improvement in participants’ knowledge related to scientific reporting and manuscript preparation.
+
+
+
+### **Summary of Domain-Level Findings**
+
+All domains demonstrated statistically significant gains, with the strongest effect observed in Statistical Reasoning, followed by Reporting & Publishing, and a moderate but meaningful improvement in Health Knowledge.
+
+
+
+
+# **Domain-Specific Effect Sizes**
+
+To compare the strength of improvement across domains, we calculate the Wilcoxon effect size (r) separately for Health Knowledge, Statistical Reasoning, and Reporting & Publishing using: 
+                                                
+                                                r = |z| / √N
+
+where z is derived from the test p-value and N is the number of paired observations.
+
+## **Health Knowledge Domain**
+```{r}
+# Effect Size: Health Knowledge (HK)
+
+z_HK <- qnorm(result_HK$p.value / 2)   # Convert Wilcoxon p-value to z-score
+
+r_HK <- abs(z_HK) / sqrt(N)            # Compute effect size
+
+r_HK
+```
+
+The estimated effect size **(r = 0.45)** indicates a moderate-to-large effect, reflecting a meaningful improvement in foundational public health knowledge.
+
+
+## **Statistical Reasoning Domain**
+```{r}
+# Effect Size: Statistical Reasoning (SR)
+
+z_SR <- qnorm(result_SR$p.value / 2)   # Convert Wilcoxon p-value to z-score
+
+r_SR <- abs(z_SR) / sqrt(N)            # Compute effect size
+
+r_SR
+```
+
+The effect size of **r = 0.69** represents a large effect, indicating that the training had a particularly strong impact on participants’ statistical understanding. 
+
+
+## **Reporting & Publishing Domain**
+```{r}
+# Effect Size: Reporting & Publishing (RP)
+
+z_RP <- qnorm(result_RP$p.value / 2)   # Convert Wilcoxon p-value to z-score
+
+r_RP <- abs(z_RP) / sqrt(N)            # Compute effect size
+
+r_RP
+```
+
+The effect size of **r = 0.63** also reflects a large effect, showing substantial improvement in participants’ knowledge of scientific reporting and publication practices.
+
+
+
+
+# **Overall Findings**
+
+The training intervention produced statistically significant and practically meaningful improvements across all assessed domains. The largest gains were observed in Statistical Reasoning, followed by Reporting & Publishing, with Health Knowledge also demonstrating a meaningful increase.
+
+These results indicate that the intervention was effective not only in improving overall scores but also in strengthening domain-specific competencies, particularly those related to analytical thinking and interpretation.
+
+More broadly, this analysis illustrates how a structured statistical workflow encompassing score derivation, reliability assessment, distributional evaluation, non-parametric testing, and effect size estimation can transform binary pre-post educational data into interpretable and reproducible quantitative evidence suitable for reporting and dissemination.

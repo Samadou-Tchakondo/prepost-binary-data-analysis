@@ -1,0 +1,298 @@
+---
+title: "GDM_CpG_Feature_Selection"
+author: "TCHAKONDO Samadou"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: false
+    toc_depth: 3
+    toc_float: true
+    number_sections: true
+    theme: cosmo
+    highlight: tango
+  word_document: default
+  pdf_document:
+    latex_engine: xelatex
+---
+
+# **Background**
+
+Gestational Diabetes Mellitus (GDM) is associated with adverse maternal and fetal outcomes.
+DNA methylation biomarkers measured during the first trimester may enable early prediction and support timely clinical intervention.
+
+This analysis aims to identify the most informative CpG sites among 12 candidates using machine learning-based feature selection methods to develop a biomarker panel.
+Specifically, two complementary techniques were applied: **LASSO logistic regression,** which performs penalized regression to identify CpGs with independent linear associations and  **Random Forest,** an ensemble learning approach used to capture potential non-linear relationships and rank variable importance
+
+
+# **Load Required Libraries**
+```{r setup, include=TRUE, warning=FALSE, message=FALSE}
+# Purpose: Prepare environment for data handling and ML analysis
+
+library(readxl)       # Import Excel data 
+library(dplyr)        # Data manipulation
+library(tidyverse)    # Visualization + piping workflow
+
+# Machine Learning Packages
+library(glmnet)       # LASSO / Elastic Net (primary feature selection)
+# 'glmnet' is used for fitting generalized linear models with elastic net regularization.
+# It is particularly useful for feature selection in high-dimensional datasets, allowing you to identify important predictors.
+
+library(randomForest) # Random Forest importance ranking
+# 'randomForest' implements the random forest algorithm, which is used for both classification and regression tasks.
+# It builds multiple decision trees and combines their predictions to improve accuracy and reduce overfitting.
+# Additionally, it provides measures of variable importance, helping you understand which features are most influential.
+
+# Reproducibility
+set.seed(123)
+# 'set.seed(123)' sets the seed for R's random number generator.
+# This ensures that any random processes (like sampling or random splits) yield the same results each time the code is run,
+# which is crucial for reproducibility in your analyses.
+```
+
+## **Data Import and Initial Inspection**
+```{r data-import}
+# Import the CpG dataset
+data <- read_excel("data/First trimester data_12_CpGs_Beta_Values_ML_Discovery_Cohort.xlsx")
+
+# Examine structure of dataset
+str(data)
+
+# Check total missing values
+sum(is.na(data))
+
+```
+
+## **Data Cleaning and Standardization**
+
+The purpose is to convert outcome variable to factor and to standardize CpG beta values (round to 3 decimals)
+
+```{r data-cleaning}
+
+data_clean <- data %>%
+  mutate(
+    # Convert outcome variable
+    GRP_GDM = factor(GRP_GDM,
+                     levels = c(0, 1),
+                     labels = c("No", "Yes")),
+
+    # Round all CpG biomarkers
+    across(starts_with("cg"), ~ round(.x, 3))
+  )
+
+# Verify transformations
+str(data_clean)
+
+# Save Cleaned Dataset for Reproducibility
+write.csv(data_clean, "output/data_cleaned.csv", row.names = FALSE)
+
+```
+
+  
+# **2.3 Distribution of Outcome Variable**
+```{r}
+
+ggplot(data_clean, aes(x = GRP_GDM)) +
+  geom_bar(fill = "green") +
+  labs(title = "Distribution of GDM Status",
+       x = "Group",
+       y = "Number of Participants") +
+  theme_minimal(base_size = 14)
+```
+
+The distribution of participants across GDM categories was examined to assess class balance prior to modelling, ensuring that predictive algorithms were not influenced by severe outcome imbalance.
+
+
+
+
+  
+# **Define Inputs for Machine Learning**
+
+The purpose  is to create predictor (x) and outcome vector (y)
+```{r define-ml-inputs}
+
+# Outcome variable
+y <- data_clean$GRP_GDM
+
+# CpG predictors
+x <- data_clean %>%
+  select(starts_with("cg"))
+
+# Convert to matrix (required for glmnet)
+x_matrix <- as.matrix(x)
+
+dim(x_matrix)
+
+# Standardize data for glmnet (The process of standardization transforms the data so that it has a mean of 0 and a standard deviation of 1. This is often done to ensure that variables with different scales)
+x_scaled <- scale(x_matrix)
+
+```
+
+# **Feature Selection Using LASSO Model with Cross-Validation** 
+
+LASSO (Least Absolute Shrinkage and Selection Operator) logistic regression was applied as the primary statistical method for feature selection. This technique introduces an L1 regularization penalty that shrinks less informative coefficients toward zero, thereby performing automatic variable selection while reducing model overfitting.
+
+The key step involves tuning the regularization parameter (λ), which controls the strength of the penalty. Ten-fold cross-validation was used to identify the optimal λ that maximized the cross-validated area under the ROC curve (AUC), ensuring the best balance between model simplicity and predictive performance.
+
+The objective of this approach was to retain CpG sites with the strongest independent predictive signal for GDM while eliminating redundant or weak contributors.
+
+
+## **Fit the Lasso model across a range of lambda values using cross-validation**
+```{r}
+# alpha=1 specifies Lasso regression (alpha=0 is Ridge, alpha between 0 and 1 is Elastic Net)
+set.seed(123)
+
+cv.lasso <- cv.glmnet(
+  x_scaled, y,
+  family = "binomial",
+  alpha  = 1,
+    nfolds = 10,
+  type.measure = "auc",  
+  standardize = FALSE
+)
+
+# Plot the cross-validation results to visualize error vs. lambda
+par(mar = c(5, 5, 7, 2))
+plot(cv.lasso,
+     main = "LASSO Cross-Validation Curve for Selection of Optimal Penalty (λ)",
+     xlab = "-Log(Lambda)",
+     ylab = "AUC")
+```
+
+## **Determine the Best Lambda Value**
+Extract the  that yields the minimum error (lambda.min).
+```{r}
+# Extract the optimal lambda value
+best.lambda <- cv.lasso$lambda.min
+print(best.lambda)
+
+```
+
+
+## **Plot Coefficient Shrinkage (Coefficient Path Plot (Variable Behaviour))**
+```{r}
+par(mar = c(5, 5, 7, 2))
+plot(glmnet(x_scaled, y, family="binomial", alpha=1, standardize = FALSE),
+     xvar="lambda",
+     label=TRUE,
+     main="LASSO Coefficient Shrinkage Paths of CpG Biomarkers",
+     xlab="-Log(Lambda)",
+     ylab="Coefficient Value")
+```
+
+## **Investigate the Coefficients to extract Selected CpGs from LASSO model**
+
+Using the coef() function with the optimal lambda to see which features have non-zero coefficients. Features with coefficients shrunk to exactly zero are effectively removed from the model.
+```{r selected-features}
+# Refit model at best lambda
+lasso.model <- glmnet(
+  x_scaled, y,
+  family = "binomial",
+  alpha = 1,
+  lambda = best.lambda,
+  standardize = FALSE
+)
+
+coefficients <- coef(lasso.model)
+print(coefficients)
+
+
+# Extract coefficients and convert to dataframe
+final_features <-
+  coef(lasso.model) %>%
+  as.matrix() %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column("Feature") %>%
+  rename(Coefficient = s0) %>%
+  filter(Coefficient != 0, Feature != "(Intercept)") %>%
+  mutate(AbsCoef = abs(Coefficient)) %>%
+  arrange(desc(AbsCoef)) %>%
+  select(Feature, Coefficient)
+print(final_features)
+
+
+# Plot selected features
+ggplot(final_features, aes(x = reorder(Feature, Coefficient), y = Coefficient)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  labs(
+    title = "R Selected CpG Features from LASSO",
+    x = "CpG Features",
+    y = "LASSO Coefficient"
+  ) +
+  theme_minimal(base_size = 14)
+```
+
+## **Interpretation of LASSO Results**
+
+Cross-validation identified an optimal penalty **(λ = 0.0088)**, indicating moderate regularization  sufficient to shrink weak signals while retaining informative CpGs.
+
+**LASSO retained 10 CpG sites,** suggesting that most biomarkers contribute some predictive information rather than yielding a highly sparse signature.
+
+Among these, **cg09518293_M6_TTN** showed the largest coefficient, indicating a strong linear association with GDM risk. In contrast, cg10139015_M5_PSMC3 demonstrated a negative coefficient, suggesting a potential inverse relationship.
+
+Two CpGs **(cg23507676_M1_BLK and cg04985016_M2_TRIP12)** were completely shrunk to zero, indicating limited independent contribution after accounting for the remaining biomarkers.
+
+
+
+
+
+# **Random Forest Importance**
+
+Random Forest analysis was conducted as a complementary machine learning approach to evaluate the relative importance of CpG biomarkers in predicting GDM. Random Forest is an ensemble method that builds multiple decision trees using bootstrap samples and aggregates their predictions, allowing it to model complex, non-linear relationships and interactions between variables that may not be captured by regression-based methods.
+
+Variable importance was assessed using the Mean Decrease in Gini index, which quantifies how much each CpG contributes to improving classification accuracy across the ensemble. The objective of this analysis was not to perform strict variable selection, but rather to rank biomarkers according to their predictive influence within a flexible, non-linear modelling framework.
+
+## **Random Forest model fitting**
+```{r rf_model fitting}
+# Random Forest model
+set.seed(123)
+
+rf_model <- randomForest(
+  x = x,
+  y = y,
+  ntree = 500,
+  importance = TRUE
+)
+
+#Variable Importance from Random Forest with values 
+importance(rf_model)
+
+# visualization from VarImpPlot function showing MeanDecreaseAccuracy and MeanDecreaseGini
+varImpPlot(rf_model, sort = TRUE,
+           main = "Random Forest Variable Importance for Prediction of GDM")
+```
+
+
+## **Extract importance**
+```{r rf-importance}
+rf_importance <- as.data.frame(importance(rf_model))
+
+rf_importance$Feature <- rownames(rf_importance)
+
+# Use MeanDecreaseGini 
+rf_final <- rf_importance %>%
+  select(Feature, MeanDecreaseGini) %>%
+  arrange(desc(MeanDecreaseGini))
+
+print(rf_final)
+
+# Plot 
+ggplot(rf_final, aes(x = reorder(Feature, MeanDecreaseGini),
+                     y = MeanDecreaseGini)) +
+  geom_col() +
+  coord_flip() +
+  labs(title = "R Random Forest Variable Importance",
+       x = "CpG Features",
+       y = "Importance Score (Mean Decrease Gini)") +
+  theme_minimal(base_size = 14)
+
+```
+
+## **Interpretation of Random Forest Results**
+
+The results identified **cg09518293_M6_TTN** as the most influential predictor, exhibiting a substantially higher importance score than the other biomarkers. This was followed by cg10139015_M5_PSMC3, cg04985016_M2_TRIP12, and cg24745753_T02_CTNNA2_ML11, indicating strong contributions to model discrimination.
+
+Notably, several CpGs that showed moderate or weak effects in the LASSO model  particularly **cg04985016_M2_TRIP12 and cg24745753_T02_CTNNA2_ML11** ranked highly in the Random Forest analysis, suggesting that these markers may contribute through non-linear relationships or interactions not captured by regression-based methods. The remaining CpG sites demonstrated lower but still measurable importance values, indicating complementary predictive roles within the ensemble model.
+
+Overall, these findings reinforce **cg09518293_M6_TTN** as a consistently dominant biomarker while highlighting additional CpGs that may enhance prediction when more complex biological interactions are considered.
+
